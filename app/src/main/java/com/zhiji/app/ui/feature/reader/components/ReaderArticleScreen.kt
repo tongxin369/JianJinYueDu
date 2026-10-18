@@ -100,6 +100,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -109,6 +110,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -137,6 +139,7 @@ import kotlin.math.hypot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 正文 TextView 排版参数（与 ParagraphItem 中 setTextSize / setLineSpacing 严格一致，测量分页依赖它） */
@@ -162,6 +165,12 @@ internal open class PlainTapDetectTextView @JvmOverloads constructor(
 
     /** 单击正文（非长按/非拖动/无选中/非注释命中）时回调，用于切换功能栏显隐 */
     var onPlainTap: () -> Unit = {}
+
+    /**
+     * 单击正文且需按「屏幕坐标分区」处理时回调（rawX = 屏幕绝对 x）。
+     * 设置后优先于 [onPlainTap]：翻页式阅读中 左 1/3=上一页、右 1/3=下一页、中间=切换功能栏。
+     */
+    var onPlainTapAt: ((rawX: Float) -> Unit)? = null
 
     /**
      * 单击命中某个字符位置时回调：返回 true 表示本次单击已被消费（不再触发 [onPlainTap]）。
@@ -222,7 +231,8 @@ internal open class PlainTapDetectTextView @JvmOverloads constructor(
             val offset = runCatching { getOffsetForPosition(event.x, event.y) }.getOrNull()
             if (offset != null && runCatching { tap(offset, event.x, event.y) }.getOrDefault(false)) return
         }
-        runCatching { onPlainTap() }
+        val at = onPlainTapAt
+        if (at != null) runCatching { at(event.rawX) } else runCatching { onPlainTap() }
     }
 }
 
@@ -812,7 +822,7 @@ fun ReaderArticleScreen(
                     paragraphColors = paragraphColors,
                     readerViewModel = viewModel,
                     fontScale = fontScaleFactor,
-                    onPlainTap = { toolbarsVisible = !toolbarsVisible }
+                    onMiddleTap = { toolbarsVisible = !toolbarsVisible }
                 )
             } else {
                 LazyColumn(
@@ -1779,6 +1789,8 @@ private fun ParagraphItem(
     onTouchOtherParagraph: () -> Unit,
     /** 沉浸式功能栏：单击正文（非长按/非注释命中）时触发（外层切换上下功能栏显隐） */
     onPlainTap: () -> Unit = {},
+    /** 翻页式：单击正文按屏幕坐标分区回调（左=上一页/右=下一页/中=切功能栏）；非 null 时优先于 onPlainTap */
+    onPlainTapAt: ((Float) -> Unit)? = null,
     /** 正文字体缩放系数（1.0 = 16sp 原始字号；与分页测量字号保持一致） */
     fontScale: Float = 1f,
     modifier: Modifier = Modifier
@@ -1938,6 +1950,7 @@ private fun ParagraphItem(
                 tv.paragraphIndex = paragraphIndex
                 // v49 沉浸式功能栏：单击正文（非长按/非注释命中）→ 切换上下功能栏显隐
                 tv.onPlainTap = onPlainTap
+                tv.onPlainTapAt = onPlainTapAt
                 // ====== v8 强调试 2：确认 factory 返回的实例真的是我们的自定义类（防止 Compose wrapper 替换类型） ======
                 runCatching {
                     var c: Class<*>? = tv::class.java
@@ -2050,6 +2063,7 @@ private fun ParagraphItem(
                 tv.paragraphIndex = paragraphIndex
                 // v49 每次 update 刷新单击回调（外层 toolbarsVisible 状态变化时 lambda 引用可能更新）
                 tv.onPlainTap = onPlainTap
+                tv.onPlainTapAt = onPlainTapAt
                 // v34 修复：不要无条件重置 TAG_CAB_STARTED
                 val cabStarted = tv.getTag(TAG_CAB_STARTED) == true
                 if (!cabStarted) {
@@ -2562,8 +2576,24 @@ private fun OriginalPagerView(
     paragraphColors: ParagraphColors,
     readerViewModel: ReaderViewModel,
     fontScale: Float = 1f,
-    onPlainTap: () -> Unit
+    onMiddleTap: () -> Unit
 ) {
+    // 翻页式：单击左 1/3 = 上一页，右 1/3 = 下一页，中间 = 切换上下功能栏
+    val tapScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val onZoneTap: (Float) -> Unit = { rawX ->
+        val last = pages.lastIndex
+        when {
+            rawX < screenWidthPx / 3f -> tapScope.launch {
+                runCatching { pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceIn(0, maxOf(0, last))) }
+            }
+            rawX > screenWidthPx * 2f / 3f -> tapScope.launch {
+                runCatching { pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceIn(0, maxOf(0, last))) }
+            }
+            else -> onMiddleTap()
+        }
+    }
     HorizontalPager(
         state = pagerState,
         modifier = Modifier.fillMaxSize()
@@ -2603,7 +2633,7 @@ private fun OriginalPagerView(
                         runCatching { annotations.filter { it.paragraphIndex == idx } }
                             .getOrDefault(emptyList())
                     }
-                    val cb = paraCallbacks(readerViewModel, idx, para, onPlainTap)
+                    val cb = paraCallbacks(readerViewModel, idx, para, onMiddleTap)
                     ParagraphItem(
                         text = para,
                         paragraphIndex = idx,
@@ -2617,6 +2647,7 @@ private fun OriginalPagerView(
                         onRequestMemoryFromActionMode = cb.onRequestMemoryFromActionMode,
                         onTouchOtherParagraph = cb.onTouchOtherParagraph,
                         onPlainTap = cb.onPlainTap,
+                        onPlainTapAt = onZoneTap,
                         fontScale = fontScale
                     )
                     Spacer(Modifier.size(4.dp))
@@ -2736,6 +2767,25 @@ private fun RewrittenPageView(
     // 按段落索引分组的改写明细：每段点词只需自己那一小份，命中判定 O(段内替换数)
     val wordsByParagraph = remember(words) { words.groupBy { it.paragraphIndex } }
 
+    // 翻页式：单击左 1/3 = 上一页，右 1/3 = 下一页，中间 = 切换上下功能栏（滚动式保持点击切栏）
+    val tapScope = rememberCoroutineScope()
+    val tapDensity = LocalDensity.current
+    val screenWidthPx = with(tapDensity) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val onZoneTap: ((Float) -> Unit)? = if (pagerMode) {
+        { rawX ->
+            val last = pages.lastIndex
+            when {
+                rawX < screenWidthPx / 3f -> tapScope.launch {
+                    runCatching { pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceIn(0, maxOf(0, last))) }
+                }
+                rawX > screenWidthPx * 2f / 3f -> tapScope.launch {
+                    runCatching { pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceIn(0, maxOf(0, last))) }
+                }
+                else -> onMiddleTap()
+            }
+        }
+    } else null
+
     if (pagerMode) {
         // ---- 翻页式：一屏一页，左右滑动即翻页（与原文共用分页与 pager 位置）----
         Box(Modifier.fillMaxSize()) {
@@ -2786,6 +2836,7 @@ private fun RewrittenPageView(
                                     words = wordsByParagraph[idx].orEmpty(),
                                     annotate = annotate,
                                     onMiddleTap = onMiddleTap,
+                                    onPlainTapAt = onZoneTap,
                                     onWordLookup = onWordLookup,
                                     fontScale = fontScale,
                                     readerViewModel = readerViewModel
@@ -2859,6 +2910,7 @@ private fun RewriteParagraphItem(
     words: List<ZhEnRewriter.Replacement>,
     annotate: Boolean,
     onMiddleTap: () -> Unit,
+    onPlainTapAt: ((Float) -> Unit)? = null,
     onWordLookup: (word: String, zh: String, category: String, anchor: IntOffset) -> Unit,
     fontScale: Float,
     readerViewModel: ReaderViewModel
@@ -2883,7 +2935,8 @@ private fun RewriteParagraphItem(
         },
         onWordLookup = onWordLookup,
         modifier = Modifier.padding(vertical = 4.dp),
-        onPlainTap = onMiddleTap
+        onPlainTap = onMiddleTap,
+        onPlainTapAt = onPlainTapAt
     )
     Spacer(Modifier.size(4.dp))
 }
@@ -3071,7 +3124,9 @@ private fun RewriteParagraphText(
     /** 正文字体缩放系数（1.0 = 16sp 原始字号） */
     fontScale: Float = 1f,
     modifier: Modifier = Modifier,
-    onPlainTap: () -> Unit = {}
+    onPlainTap: () -> Unit = {},
+    /** 翻页式：单击正文按屏幕坐标分区回调（左=上一页/右=下一页/中=切功能栏）；非 null 时优先于 onPlainTap */
+    onPlainTapAt: ((Float) -> Unit)? = null
 ) {
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
     // ActionMode 自定义菜单常量 id（与原文 ParagraphItem 完全一致）
@@ -3139,6 +3194,8 @@ private fun RewriteParagraphText(
                 }
                 // 沉浸式功能栏：单击正文切换显隐
                 this.onPlainTap = onPlainTap
+                // 翻页式：单击按屏幕分区（左/右翻页，中间切栏）
+                this.onPlainTapAt = onPlainTapAt
                 // 单击英文单词 → 弹「原意」卡片（命中即消费本次点击，不再切换功能栏）
                 this.onCharTap = charTap@ { offset, tapX, tapY ->
                     val hit = hitReplacement(words, offset, annotate) ?: return@charTap false
@@ -3150,6 +3207,7 @@ private fun RewriteParagraphText(
         update = { tv ->
             if (tv.text.toString() != text) tv.text = text
             runCatching { tv.onPlainTap = onPlainTap }
+            runCatching { tv.onPlainTapAt = onPlainTapAt }
             // 字体缩放变化 → 同步字号与行距（与分页测量使用的字号保持一致）
             runCatching {
                 tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f * fontScale)

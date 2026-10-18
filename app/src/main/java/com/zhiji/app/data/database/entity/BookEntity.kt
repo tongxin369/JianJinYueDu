@@ -1,5 +1,6 @@
 package com.zhiji.app.data.database.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -32,6 +33,9 @@ data class BookEntity(
     val board: String = "smart_reader",
     /** 所属分类文件夹 id；null = 根目录（书籍分类树） */
     val folderId: String? = null,
+    /** 是否显示在书架（false = 仅在分类列表可见，用于自定义书架展示哪些书）；默认显示 */
+    @ColumnInfo(defaultValue = "1")
+    val shownOnShelf: Boolean = true,
     val lastReadAt: Long = 0L,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L

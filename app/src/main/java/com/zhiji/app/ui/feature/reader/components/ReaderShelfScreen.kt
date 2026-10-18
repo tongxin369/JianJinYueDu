@@ -78,8 +78,10 @@ fun ReaderShelfScreen(
     onOpenBook: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val books by viewModel.folderBooks.collectAsStateWithLifecycle()
+    val booksAll by viewModel.folderBooks.collectAsStateWithLifecycle()
     val allBooks by viewModel.shelfBooks.collectAsStateWithLifecycle()
+    // 书架只显示用户勾选「显示在书架」的书籍；分类抽屉则展示全部
+    val books = remember(booksAll) { booksAll.filter { it.shownOnShelf } }
     val folders by viewModel.folders.collectAsStateWithLifecycle()
     val currentFolderId by viewModel.currentFolderId.collectAsStateWithLifecycle()
     val clipboard by viewModel.clipboard.collectAsStateWithLifecycle()
@@ -116,7 +118,7 @@ fun ReaderShelfScreen(
             ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.9f)) {
                 ShelfFolderDrawer(
                     folders = folders,
-                    currentBooks = books,
+                    currentBooks = booksAll,
                     allBooks = allBooks,
                     currentFolderId = currentFolderId,
                     clipboard = clipboard,
@@ -132,6 +134,7 @@ fun ReaderShelfScreen(
                     onMoveBook = { id, folderId -> viewModel.moveBookTo(id, folderId) },
                     onCopyBook = { viewModel.copyBookToClipboard(it) },
                     onCutBook = { viewModel.cutBookToClipboard(it) },
+                    onToggleShowOnShelf = { viewModel.setBookShownOnShelf(it.id, !it.shownOnShelf) },
                     onPaste = { viewModel.pasteClipboard() },
                     onImportBook = { doImport() }
                 )
@@ -210,6 +213,7 @@ fun ReaderShelfScreen(
                 if (books.isEmpty()) {
                     EmptyShelf(
                         inFolder = currentFolderId != null,
+                        hasHidden = booksAll.isNotEmpty(),
                         onImport = { doImport() },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -250,7 +254,12 @@ private fun Breadcrumb(text: String, active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmptyShelf(inFolder: Boolean, onImport: () -> Unit, modifier: Modifier = Modifier) {
+private fun EmptyShelf(
+    inFolder: Boolean,
+    hasHidden: Boolean,
+    onImport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -263,13 +272,21 @@ private fun EmptyShelf(inFolder: Boolean, onImport: () -> Unit, modifier: Modifi
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
         )
         Text(
-            if (inFolder) "此文件夹还没有书籍" else "书架还空着",
+            when {
+                hasHidden -> "部分书籍已隐藏"
+                inFolder -> "此文件夹还没有书籍"
+                else -> "书架还空着"
+            },
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 16.dp)
         )
         Text(
-            if (inFolder) "点击右下导入按钮，把书籍加入此文件夹" else "导入 .txt / .md 文件，开启循序渐进的阅读学习",
+            when {
+                hasHidden -> "这些书已设置为不显示在书架，可在左上角分类列表里改回「显示在书架」"
+                inFolder -> "点击右上角导入按钮，把书籍加入此文件夹"
+                else -> "导入 .txt / .md / .html 文件，开启循序渐进的阅读学习"
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             modifier = Modifier.padding(top = 6.dp)

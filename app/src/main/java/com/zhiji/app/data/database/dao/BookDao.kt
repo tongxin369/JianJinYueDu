@@ -61,6 +61,10 @@ interface BookDao {
     @Query("UPDATE books SET folderId = :folderId, updatedAt = :ts WHERE id = :id")
     suspend fun updateFolder(id: String, folderId: String?, ts: Long)
 
+    /** 书籍分类：设置是否显示在书架 */
+    @Query("UPDATE books SET shownOnShelf = :shown, updatedAt = :ts WHERE id = :id")
+    suspend fun updateShownOnShelf(id: String, shown: Boolean, ts: Long)
+
     // ---------- Book Annotations (注释/下划线) ----------
 
     @Query("SELECT * FROM book_annotations WHERE bookId = :bookId ORDER BY paragraphIndex ASC, startInParagraph ASC")

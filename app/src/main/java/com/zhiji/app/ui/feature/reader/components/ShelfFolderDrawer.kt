@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileMove
@@ -31,8 +32,9 @@ import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NoteAdd
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,18 +58,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhiji.app.data.database.entity.BookEntity
 import com.zhiji.app.data.database.entity.BookFolderEntity
 import com.zhiji.app.ui.feature.reader.ReaderViewModel
 
 /**
  * 书架左侧「分类抽屉」内容：
- *   - 顶部面包屑导航（根目录 › 子文件夹 …，可点击跳转）
- *   - 工具栏：新建文件夹 / 导入书籍 / 粘贴
- *   - 文件夹树 + 当前文件夹内书籍，支持重命名 / 删除(文件夹) / 移动 / 复制 / 剪切
+ *   - 顶部标题栏 + 右侧图标操作（新建文件夹 / 导入书籍 / 粘贴 / 返回上级）
+ *   - 面包屑导航（根目录 › 子文件夹 …，可点击跳转）
+ *   - 文件夹树 + 当前文件夹内书籍，支持重命名 / 删除(文件夹) / 移动 / 复制 / 剪切 / 显示在书架
  *
- * 目的：用文件夹式结构对书籍做分类整理。
+ * 目的：用文件夹式结构对书籍做分类整理，并可自定义哪些书显示在书架。
  */
 @Composable
 fun ShelfFolderDrawer(
@@ -85,6 +86,7 @@ fun ShelfFolderDrawer(
     onMoveBook: (String, String?) -> Unit,
     onCopyBook: (BookEntity) -> Unit,
     onCutBook: (BookEntity) -> Unit,
+    onToggleShowOnShelf: (BookEntity) -> Unit,
     onPaste: () -> Unit,
     onImportBook: () -> Unit,
     modifier: Modifier = Modifier
@@ -115,10 +117,10 @@ fun ShelfFolderDrawer(
     var moveBookTarget by remember { mutableStateOf<BookEntity?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // 标题栏
+        // 标题栏 + 右侧图标操作
         Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Filled.Folder, null, tint = MaterialTheme.colorScheme.primary)
@@ -129,6 +131,17 @@ fun ShelfFolderDrawer(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = { showNewFolder = true }) {
+                    Icon(Icons.Filled.CreateNewFolder, contentDescription = "新建文件夹")
+                }
+                IconButton(onClick = { onImportBook() }) {
+                    Icon(Icons.Filled.NoteAdd, contentDescription = "导入书籍")
+                }
+                if (clipboard != null) {
+                    IconButton(onClick = { onPaste() }) {
+                        Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴《${clipboard.title}》")
+                    }
+                }
                 if (currentFolderId != null) {
                     IconButton(onClick = {
                         onEnterFolder(folders.firstOrNull { it.id == currentFolderId }?.parentId)
@@ -151,18 +164,6 @@ fun ShelfFolderDrawer(
             path.forEach { f ->
                 Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
                 Crumb(text = f.name, active = f.id == currentFolderId) { onEnterFolder(f.id) }
-            }
-        }
-
-        // 工具栏
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            ToolButton(Icons.Filled.CreateNewFolder, "新建文件夹") { showNewFolder = true }
-            ToolButton(Icons.Filled.NoteAdd, "导入书籍") { onImportBook() }
-            if (clipboard != null) {
-                ToolButton(Icons.Filled.ContentPaste, "粘贴《${clipboard.title}》") { onPaste() }
             }
         }
 
@@ -198,7 +199,8 @@ fun ShelfFolderDrawer(
                         onRename = { renameBookTarget = book },
                         onMove = { moveBookTarget = book },
                         onCopy = { onCopyBook(book) },
-                        onCut = { onCutBook(book) }
+                        onCut = { onCutBook(book) },
+                        onToggleShow = { onToggleShowOnShelf(book) }
                     )
                 }
             }
@@ -274,6 +276,7 @@ fun ShelfFolderDrawer(
     }
 }
 
+/** 文件夹全路径（根 › 上级 › 本夹），移动选择时展示 */
 private fun folderFullPath(folder: BookFolderEntity, all: List<BookFolderEntity>): String {
     val map = all.associateBy { it.id }
     val names = mutableListOf<String>()
@@ -302,26 +305,6 @@ private fun Crumb(text: String, active: Boolean, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(horizontal = 6.dp, vertical = 4.dp)
     )
-}
-
-@Composable
-private fun ToolButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
-            .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
 }
 
 @Composable
@@ -375,7 +358,8 @@ private fun BookRow(
     onRename: () -> Unit,
     onMove: () -> Unit,
     onCopy: () -> Unit,
-    onCut: () -> Unit
+    onCut: () -> Unit,
+    onToggleShow: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(
@@ -385,20 +369,44 @@ private fun BookRow(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Filled.PictureAsPdf, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(12.dp))
-        Text(
-            book.title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
+        Icon(
+            Icons.Filled.PictureAsPdf, null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(22.dp)
         )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                book.title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (book.shownOnShelf) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+            if (!book.shownOnShelf) {
+                Text(
+                    "未显示在书架",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
         Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "更多")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (book.shownOnShelf) "从书架隐藏" else "显示在书架") },
+                    leadingIcon = {
+                        Icon(
+                            if (book.shownOnShelf) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            null
+                        )
+                    },
+                    onClick = { menu = false; onToggleShow() }
+                )
                 DropdownMenuItem(
                     text = { Text("重命名") },
                     leadingIcon = { Icon(Icons.Filled.DriveFileRenameOutline, null) },

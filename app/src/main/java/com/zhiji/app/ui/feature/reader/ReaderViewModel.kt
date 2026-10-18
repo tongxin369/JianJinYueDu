@@ -119,6 +119,14 @@ class ReaderViewModel(app: ZhiJiApp) : AndroidViewModel(app) {
         }
     }
 
+    /** 设置书籍是否显示在书架（自定义书架展示哪些书） */
+    fun setBookShownOnShelf(bookId: String, shown: Boolean) {
+        viewModelScope.launch {
+            runCatching { repository.setBookShownOnShelf(bookId, shown) }
+            _toastMessage.value = if (shown) "已显示在书架" else "已从书架隐藏（分类列表中仍可见）"
+        }
+    }
+
     // ---- 书籍复制/剪切/粘贴（分类整理用）----
     data class ClipboardItem(val mode: String, val bookId: String, val title: String)
 

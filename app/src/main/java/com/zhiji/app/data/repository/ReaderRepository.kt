@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
+import org.jsoup.Jsoup
 import java.io.File
 import java.io.Reader
 import java.util.UUID
@@ -127,6 +128,23 @@ class ReaderRepository(
     }
 
     /**
+     * HTML → 纯文本：移除脚本/样式，把 <br> 与块级标签转换为换行，保留正文段落结构。
+     * （阅读与改写统一按纯文本处理，不保留图片与复杂样式）
+     */
+    private fun htmlToPlainText(doc: org.jsoup.nodes.Document): String {
+        doc.select("script, style, noscript, iframe, svg, head").remove()
+        doc.outputSettings().prettyPrint(false)
+        doc.select("br").append("\n")
+        doc.select("p, div, h1, h2, h3, h4, h5, h6, li, tr, section, article, header, footer, blockquote, pre")
+            .append("\n")
+        val text = doc.body()?.wholeText() ?: doc.text()
+        return text
+            .replace(Regex("[ \\t]+\\n"), "\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+    }
+
+    /**
      * 流式统计字符数（与 [contentCharsOf] 完全等价，但不把整本书读进内存）。
      * 用于大文件导入：边复制边统计，避免 20MB 文件在导入时占用几十 MB 堆内存。
      */
@@ -167,15 +185,28 @@ class ReaderRepository(
         val format = when (ext) {
             "md", "markdown" -> "md"
             "txt", "text" -> "txt"
+            "html", "htm", "xhtml" -> "html"
             else -> ext.ifBlank { "txt" }
         }
-        val title = name.substringBeforeLast('.').ifBlank { name }
+        var title = name.substringBeforeLast('.').ifBlank { name }
 
         val id = UUID.randomUUID().toString()
         var sourceUri = uri.toString()
         var content: String? = null
         var totalChars = 0
-        if (size in 1..contentMaxCacheBytes) {
+        if (format == "html") {
+            // HTML 文档：解析后提取纯文本（保留标题/段落结构），阅读与改写均按纯文本处理
+            val raw = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { TextEncoding.readText(it) }
+            }.getOrNull()
+            if (!raw.isNullOrBlank()) {
+                val doc = Jsoup.parse(raw)
+                val htmlTitle = doc.title().trim()
+                if (htmlTitle.isNotBlank()) title = htmlTitle
+                content = htmlToPlainText(doc)
+                totalChars = if (content.isNullOrBlank()) 0 else contentCharsOf(content)
+            }
+        } else if (size in 1..contentMaxCacheBytes) {
             // 小文件：整篇读进内存 + 缓存进 DB（打开时零 IO 等待）。编码感知解码，避免乱码
             content = runCatching {
                 context.contentResolver.openInputStream(uri)?.use { TextEncoding.readText(it) }
@@ -344,6 +375,11 @@ class ReaderRepository(
     /** 移动书籍到指定文件夹（folderId = null 表示根目录） */
     suspend fun moveBook(bookId: String, folderId: String?) = withContext(Dispatchers.IO) {
         bookDao.updateFolder(bookId, folderId, System.currentTimeMillis())
+    }
+
+    /** 设置书籍是否显示在书架（自定义书架展示） */
+    suspend fun setBookShownOnShelf(bookId: String, shown: Boolean) = withContext(Dispatchers.IO) {
+        bookDao.updateShownOnShelf(bookId, shown, System.currentTimeMillis())
     }
 
     /**
