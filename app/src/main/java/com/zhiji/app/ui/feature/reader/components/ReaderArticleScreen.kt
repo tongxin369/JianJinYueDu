@@ -92,6 +92,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -128,7 +129,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zhiji.app.core.algorithm.ZhEnRewriter
 import com.zhiji.app.data.database.entity.BookAnnotationEntity
 import com.zhiji.app.data.database.entity.BookEntity
+import com.zhiji.app.core.tts.TtsModelStore
 import com.zhiji.app.ui.feature.ai.OfflineTtsSpeaker
+import com.zhiji.app.ui.feature.ai.TtsDownloadDialog
 import com.zhiji.app.ui.feature.reader.ReaderViewModel
 import kotlin.math.hypot
 import kotlinx.coroutines.Dispatchers
@@ -489,6 +492,14 @@ fun ReaderArticleScreen(
     // ---- 朗读 ----
     val speaker = remember { OfflineTtsSpeaker(context) }
     var isSpeaking by remember { mutableIntStateOf(0) } // 0 停止 1 朗读
+    // 离线语音包未下载时的下载引导弹窗
+    var ttsDownloadVisible by remember { mutableStateOf(false) }
+
+    // 进入阅读页：已下载则后台预加载模型（降低首次朗读延迟）；离开时释放引擎与音频资源
+    DisposableEffect(Unit) {
+        speaker.preload()
+        onDispose { speaker.release() }
+    }
 
     // ---- Toast 消费 ----
     LaunchedEffect(memoryMsg) {
@@ -1264,6 +1275,11 @@ fun ReaderArticleScreen(
                     onReadAloud = {
                         val all = paragraphs.filter { it.isNotBlank() }.joinToString(" ")
                         if (all.isBlank()) return@ReaderBottomBar
+                        // 语音包未下载 → 先引导下载
+                        if (!TtsModelStore.isReady(context)) {
+                            ttsDownloadVisible = true
+                            return@ReaderBottomBar
+                        }
                         speaker.speak(all,
                             onError = { err -> Toast.makeText(context, "朗读失败：$err", Toast.LENGTH_SHORT).show() },
                             onStarted = { isSpeaking = 1 },
@@ -1327,6 +1343,23 @@ fun ReaderArticleScreen(
                 }
             )
         }
+
+        // ========== 离线语音包按需下载弹窗（首次朗读时引导，下载后立即开始朗读）==========
+        TtsDownloadDialog(
+            visible = ttsDownloadVisible,
+            onDismiss = { ttsDownloadVisible = false },
+            onReady = {
+                ttsDownloadVisible = false
+                val all = paragraphs.filter { it.isNotBlank() }.joinToString(" ")
+                if (all.isNotBlank()) {
+                    speaker.speak(all,
+                        onError = { err -> Toast.makeText(context, "朗读失败：$err", Toast.LENGTH_SHORT).show() },
+                        onStarted = { isSpeaking = 1 },
+                        onFinished = { isSpeaking = 0 }
+                    )
+                }
+            }
+        )
     }
 }
 

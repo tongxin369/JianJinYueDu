@@ -11,6 +11,9 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
+import com.zhiji.app.core.tts.TtsModelMissingException
+import com.zhiji.app.core.tts.TtsModelStore
+import java.io.File
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -24,15 +27,14 @@ import kotlinx.coroutines.launch
 /**
  * 基于 sherpa-onnx 的纯离线中文/英文朗读引擎。
  *
- * - 不联网、不依赖系统 TTS 引擎、无任何语音包下载
+ * - 不依赖系统 TTS 引擎
+ * - 语音包按需下载（见 [TtsModelStore]），从 filesDir 加载，不随 APK 打包
  * - 流水线预合成：按句拆文本，播放第 N 句的同时后台预合成第 N+1 句，
  *   实现句间无缝连读（不逐句停顿）
- * - 模型文件内置在 assets/vits-melo-tts-zh_en 下
  */
 class OfflineTtsSpeaker(context: Context) {
 
     private companion object {
-        const val MODEL_DIR = "vits-melo-tts-zh_en"
         // 每段最大字符数：超过则二次切短，保证流水线预合成追得上播放、无句间停顿
         const val MAX_SEG_CHARS = 14
     }
@@ -54,8 +56,9 @@ class OfflineTtsSpeaker(context: Context) {
     @Volatile
     private var generation = 0
 
-    /** 后台预加载模型并预创建 AudioTrack（进入界面即调用，降低首次朗读延迟）。 */
+    /** 后台预加载模型并预创建 AudioTrack（进入界面即调用，降低首次朗读延迟）。语音包未下载则跳过。 */
     fun preload() {
+        if (!TtsModelStore.isReady(appContext)) return
         scope.launch {
             try {
                 val engine = ensureInitialized()
@@ -86,6 +89,10 @@ class OfflineTtsSpeaker(context: Context) {
                 ensureInitialized()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
+            } catch (e: TtsModelMissingException) {
+                postOnMain { onError("离线语音包尚未下载") }
+                playing = false
+                return@launch
             } catch (e: Exception) {
                 postOnMain { onError("语音引擎加载失败，请重启应用重试") }
                 playing = false
@@ -180,26 +187,26 @@ class OfflineTtsSpeaker(context: Context) {
     @Synchronized
     private fun ensureInitialized(): OfflineTts {
         tts?.let { return it }
+        if (!TtsModelStore.isReady(appContext)) throw TtsModelMissingException()
+        val dir = TtsModelStore.modelDir(appContext)
+        fun path(name: String) = File(dir, name).absolutePath
         val config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
-                    model = "$MODEL_DIR/model.onnx",
-                    lexicon = "$MODEL_DIR/lexicon.txt",
-                    tokens = "$MODEL_DIR/tokens.txt",
+                    model = path("model.onnx"),
+                    lexicon = path("lexicon.txt"),
+                    tokens = path("tokens.txt"),
                 ),
                 numThreads = 8,
                 debug = false,
                 provider = "cpu",
             ),
             // 中文文本归一化规则（数字/日期/电话号码/多音字），缺失会导致朗读含糊不清
-            ruleFsts = listOf(
-                "$MODEL_DIR/date.fst",
-                "$MODEL_DIR/number.fst",
-                "$MODEL_DIR/phone.fst",
-                "$MODEL_DIR/new_heteronym.fst",
-            ).joinToString(","),
+            ruleFsts = listOf("date.fst", "number.fst", "phone.fst", "new_heteronym.fst")
+                .joinToString(",") { path(it) },
         )
-        val engine = OfflineTts(assetManager = appContext.assets, config = config)
+        // 语音包已下载到本地文件系统：assetManager 传 null → 从绝对路径加载
+        val engine = OfflineTts(assetManager = null, config = config)
         tts = engine
         return engine
     }

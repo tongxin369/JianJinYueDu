@@ -67,7 +67,7 @@ class ZhiJiApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        // App 启动即后台预加载 TTS 模型（首个朗读响应更快）
+        // App 启动即后台预加载 TTS 模型（已下载离线语音包时才会真正加载，否则跳过）
         ttsSpeaker.preload()
 
         // 记忆库卡片变化 → 防抖重算词库掌握等级（不抽卡也知道词变多了也能看到进步）

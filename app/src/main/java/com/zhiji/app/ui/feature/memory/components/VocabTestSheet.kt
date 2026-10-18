@@ -73,6 +73,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zhiji.app.ZhiJiApp
 import com.zhiji.app.core.algorithm.VocabGrader
 import com.zhiji.app.core.algorithm.VocabTestSession
+import com.zhiji.app.core.tts.TtsModelStore
+import com.zhiji.app.ui.feature.ai.TtsDownloadDialog
 import com.zhiji.app.data.database.entity.VocabHistoryEntity
 import com.zhiji.app.data.database.entity.VocabProficiencyEntity
 import com.zhiji.app.data.repository.EcdictRepository
@@ -519,6 +521,7 @@ private fun AskView(
 ) {
     val ctx = LocalContext.current
     val speaker = remember { (ctx.applicationContext as ZhiJiApp).ttsSpeaker }
+    var ttsDownloadVisible by remember { mutableStateOf(false) }
     val t = VocabGrader.TIERS[tier]
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -559,9 +562,13 @@ private fun AskView(
                 // 内置 TTS 朗读本词
                 OutlinedButton(
                     onClick = {
-                        speaker.speak(text = word.word, onError = { msg ->
-                            Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
-                        })
+                        if (!TtsModelStore.isReady(ctx)) {
+                            ttsDownloadVisible = true
+                        } else {
+                            speaker.speak(text = word.word, onError = { msg ->
+                                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+                            })
+                        }
                     },
                     modifier = Modifier.height(40.dp)
                 ) { Text("🔊 朗读", fontSize = 13.sp, fontWeight = FontWeight.Medium) }
@@ -587,6 +594,16 @@ private fun AskView(
         }
         Spacer(modifier = Modifier.size(16.dp))
     }
+    TtsDownloadDialog(
+        visible = ttsDownloadVisible,
+        onDismiss = { ttsDownloadVisible = false },
+        onReady = {
+            ttsDownloadVisible = false
+            speaker.speak(text = word.word, onError = { msg ->
+                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+            })
+        }
+    )
 }
 
 /** 作答确认视图：展示释义（学习机会），跳到下一题/下一层级 */
@@ -603,6 +620,7 @@ private fun RevealView(
 ) {
     val ctx = LocalContext.current
     val speaker = remember { (ctx.applicationContext as ZhiJiApp).ttsSpeaker }
+    var ttsDownloadVisible by remember { mutableStateOf(false) }
     val t = VocabGrader.TIERS[tier]
     val known = status == "known"
     val semi = status == "semi"
@@ -676,9 +694,13 @@ private fun RevealView(
                 // 翻译界面也接入内置 TTS 朗读
                 OutlinedButton(
                     onClick = {
-                        speaker.speak(text = word.word, onError = { msg ->
-                            Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
-                        })
+                        if (!TtsModelStore.isReady(ctx)) {
+                            ttsDownloadVisible = true
+                        } else {
+                            speaker.speak(text = word.word, onError = { msg ->
+                                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+                            })
+                        }
                     },
                     modifier = Modifier.height(40.dp)
                 ) { Text("🔊 朗读", fontSize = 13.sp, fontWeight = FontWeight.Medium) }
@@ -691,6 +713,16 @@ private fun RevealView(
             Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
         }
     }
+    TtsDownloadDialog(
+        visible = ttsDownloadVisible,
+        onDismiss = { ttsDownloadVisible = false },
+        onReady = {
+            ttsDownloadVisible = false
+            speaker.speak(text = word.word, onError = { msg ->
+                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+            })
+        }
+    )
 }
 
 /** 单词难度标签摘要：国内年级/学段 + 考试标签 + BNC/COCA 原始词频排名数值 */

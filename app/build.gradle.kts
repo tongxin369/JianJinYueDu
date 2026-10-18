@@ -127,6 +127,9 @@ dependencies {
     // sherpa-onnx 离线语音合成（本地 AAR，含 Kotlin 绑定 + native 库）
     implementation(files("libs/sherpa-onnx-1.13.5.aar"))
 
+    // 离线语音包按需下载：官方模型为 .tar.bz2，需 bzip2 + tar 解压支持（不打包进 APK）
+    implementation("org.apache.commons:commons-compress:1.21")
+
     // Navigation (for future deep links; primary nav is state-based)
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
