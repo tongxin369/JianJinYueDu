@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 「阅见」Logo：上方「目光/瞳孔」= 看见与洞察，下方「翻开的书页」= 阅读本体 -->
+    <!-- 眼睛（杏仁形轮廓） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,32 C46,25 62,25 68,32 C62,39 46,39 40,32 Z" />
+    <!-- 瞳孔（靛蓝背景自然透出的空心环感由下方瞳孔体现） -->
+    <path
+        android:fillColor="#4B3FE3"
+        android:pathData="M54,32 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0" />
+    <!-- 翻开的书页：左页 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M53,46 C48,43 42,41 36,41 L36,68 C42,68 48,70 53,74 Z" />
+    <!-- 翻开的书页：右页（中缝留出背景色细线，形成书脊） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M55,46 C60,43 66,41 72,41 L72,68 C66,68 60,70 55,74 Z" />
+</vector>

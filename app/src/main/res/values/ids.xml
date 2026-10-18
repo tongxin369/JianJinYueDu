@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        TextView.setTag(int key, Object value) 的 key 必须是「应用资源 id」（R.id.xxx），
+        不能用硬编码整数（如 10001）→ 否则 API 28+ 抛 IllegalArgumentException:
+            "The key must be an application-specific resource id"
+        这里用 ids.xml 声明全局唯一 id，setTag/getTag 时引用。
+     -->
+    <item type="id" name="tag_runnable" />
+    <item type="id" name="tag_spannable" />
+    <!-- ⚠️ v20：标记 customSelectionActionModeCallback.onCreateActionMode 是否被系统成功调用
+         false/null = NoActionBar 主题下 startActionMode 返回 NULL → SelectionController 会自动清手柄
+         true = 系统原生 startActionMode 启动成功（有 ActionBar 主题/系统版本特殊兼容），不需要修复 -->
+    <item type="id" name="tag_cab_started" />
+    <!-- ⚠️ v27：Step3 poll 轮询修复需要引用当前 Step2 创建的 actionModeCallback（跨 runCatching lambda 作用域传引用）
+         因为 poll 的 Runnable 在 Step2 之后创建，需要通过 TextView tag 取到 callback，才能在 startActionMode 时调用 -->
+    <item type="id" name="tag_action_mode_callback" />
+    <!-- ⚠️ v27：Step3 poll 防止重复启动修复（s<e 时每 20ms 都会进来，重复 postDelayed 会导致多次启动 CAB 冲突）
+         true = 已经 postDelayed 了修复逻辑，50ms 内不要再 post；false = 可以发起新的修复检测 -->
+    <item type="id" name="tag_fix_pending" />
+</resources>
