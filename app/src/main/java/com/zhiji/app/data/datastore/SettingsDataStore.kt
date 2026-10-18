@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "zhiji_settings")
 
 /**
- * 「阅见」偏好设置存储：仅保留阅读器 + 记忆库相关配置。
+ * 「渐进阅读」偏好设置存储：仅保留阅读器 + 记忆库相关配置。
  *   - 阅读习惯（翻页/滚动、原文/改写、改写显示模式、字体缩放）
  *   - 改写难度微调（每 100 字窗口内 不熟/不会/新增词 的个数）
  *   - 主题（深浅色 / 动态取色）

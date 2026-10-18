@@ -24,7 +24,7 @@ import com.zhiji.app.data.database.entity.VocabHistoryEntity
 import com.zhiji.app.data.database.entity.VocabProficiencyEntity
 
 /**
- * 「阅见」独立数据库（仅智能阅读器 + 记忆库相关表）。
+ * 「渐进阅读」独立数据库（仅智能阅读器 + 记忆库相关表）。
  *
  * 作为独立 App，本库从 version = 1 全新起步，不再承载旧「智集」的历史迁移链。
  * 表集合：

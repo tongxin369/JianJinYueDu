@@ -1,24 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  「渐进阅读 JianJinYueDu」Logo
+  设计理念：翻开的书页 = 阅读；三根逐级升高的圆角柱 = 循序渐进、由易到难；
+  顶端新芽 = 自然、生长。整体配色取自然绿，简约、干净、舒适。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 「阅见」Logo：上方「目光/瞳孔」= 看见与洞察，下方「翻开的书页」= 阅读本体 -->
-    <!-- 眼睛（杏仁形轮廓） -->
+
+    <!-- 渐进柱：单一 path 三个子路径，浅绿 → 深绿 渐变，直观表达「由浅入深、循序渐进」 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M40,32 C46,25 62,25 68,32 C62,39 46,39 40,32 Z" />
-    <!-- 瞳孔（靛蓝背景自然透出的空心环感由下方瞳孔体现） -->
+        android:pathData="M36,58 L36,52 Q36,48 40,48 Q44,48 44,52 L44,58 Z
+                          M50,58 L50,46 Q50,42 54,42 Q58,42 58,46 L58,58 Z
+                          M64,58 L64,38 Q64,34 68,34 Q72,34 72,38 L72,58 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="36"
+                android:startY="58"
+                android:endX="72"
+                android:endY="34">
+                <item android:offset="0.0" android:color="#A6DEB8" />
+                <item android:offset="1.0" android:color="#23825C" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 新芽：自然与生长 -->
     <path
-        android:fillColor="#4B3FE3"
-        android:pathData="M54,32 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0" />
+        android:fillColor="#3E9D6E"
+        android:pathData="M69,33.5 C65.5,27.5 68.2,23.2 72.8,24 C73.8,28.2 71.6,32.6 69,33.5 Z" />
+
     <!-- 翻开的书页：左页 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M53,46 C48,43 42,41 36,41 L36,68 C42,68 48,70 53,74 Z" />
-    <!-- 翻开的书页：右页（中缝留出背景色细线，形成书脊） -->
+        android:fillColor="#FFFDF7"
+        android:pathData="M54,61 C48,58 40,57 33,58 L33,79 C40,78 48,79 54,82 Z" />
+
+    <!-- 翻开的书页：右页 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M55,46 C60,43 66,41 72,41 L72,68 C66,68 60,70 55,74 Z" />
+        android:fillColor="#FFFDF7"
+        android:pathData="M54,61 C60,58 68,57 75,58 L75,79 C68,78 60,79 54,82 Z" />
+
+    <!-- 书脊：一条极淡的折痕线，让「打开的书」更易识别 -->
+    <path
+        android:fillColor="#E4F1E7"
+        android:pathData="M53.1,61.6 L54.9,61.6 L54.9,81.4 L53.1,81.4 Z" />
 </vector>

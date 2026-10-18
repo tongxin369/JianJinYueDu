@@ -44,11 +44,11 @@ object BackupManager {
     private const val DB_NAME = "zhiji.db"
     private const val DATASTORE_DIR = "datastore"
     private const val DATASTORE_FILE = "zhiji_settings.preferences_pb"
-    // v50 软件改名为「阅见 YueJian」：备份文件名以 yuejian 开头（旧名 zhiji 弃用）
-    private const val BACKUP_PREFIX = "yuejian_backup_"
+    // 软件名「渐进阅读 JianJinYueDu」：备份文件名以 JianJinYueDu 开头
+    private const val BACKUP_PREFIX = "JianJinYueDu_backup_"
     private const val BACKUP_EXT = ".zbak"  // ZhiJi Backup (ZIP 格式)
     const val LEGACY_DB_EXT = ".db"
-    private const val FOLDER_NAME = "YueJian"
+    private const val FOLDER_NAME = "JianJinYueDu"
     private const val MIME = "application/octet-stream"
 
     private const val ZIP_DB_PATH = "db/$DB_NAME"

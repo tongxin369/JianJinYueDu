@@ -26,7 +26,7 @@ private data class BottomTab(
     val icon: ImageVector
 )
 
-/** 「阅见」三大板块：书架（智能阅读器） + 记忆库 + 用户（设置） */
+/** 「渐进阅读」三大板块：书架（智能阅读器） + 记忆库 + 用户（设置） */
 private val tabs = listOf(
     BottomTab("书架", Icons.AutoMirrored.Filled.MenuBook),
     BottomTab("记忆库", Icons.Filled.PsychologyAlt),
