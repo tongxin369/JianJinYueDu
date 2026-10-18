@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
 import com.zhiji.app.ZhiJiApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,7 +65,16 @@ object BackupManager {
     private val timestampFmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
     private val displayTimeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
-    data class BackupResult(val success: Boolean, val message: String, val backupPath: String? = null)
+    data class BackupResult(
+        val success: Boolean,
+        val message: String,
+        /** 可读的备份地址（含文件名），用于弹框展示 */
+        val backupPath: String? = null,
+        /** 备份文件大小（字节） */
+        val sizeBytes: Long = 0L,
+        /** 备份完成时间（毫秒） */
+        val timeMillis: Long = 0L
+    )
 
     /** 列表弹窗展示用：MediaStore 扫出来的一条备份文件 */
     data class BackupFileInfo(
@@ -147,7 +157,7 @@ object BackupManager {
             }
             val dsFile = datastoreFile(context)
 
-            // 2. 先把 ZIP 写 cache 临时文件，再一次性提交 MediaStore
+            // 2. 先把 ZIP 写 cache 临时文件，再一次性提交目标目录
             val tmpZip = File(context.cacheDir, "backup_${timestampFmt.format(Date())}$BACKUP_EXT")
             ZipOutputStream(FileOutputStream(tmpZip)).use { zos ->
                 addZipEntry(zos, ZIP_DB_PATH, dbFile)
@@ -159,32 +169,64 @@ object BackupManager {
                 append(timestampFmt.format(Date()))
                 append(BACKUP_EXT)
             }
+            val nowMs = System.currentTimeMillis()
+            val size = tmpZip.length()
 
-            // 3. MediaStore 写入 → Download/Zhiji
-            val resolver = context.contentResolver
-            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, filename)
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER_NAME")
-                put(MediaStore.Downloads.MIME_TYPE, MIME)
-                put(MediaStore.Downloads.IS_PENDING, 1)
+            // 3. 优先写入用户自定义目录（SAF 树 Uri）；否则默认 Download/Zhiji
+            val customDir = customBackupDir(context)
+            val displayPath: String
+            if (customDir != null) {
+                val target = customDir.createFile(MIME, filename)
+                    ?: run {
+                        cleanup(listOf(tmpZip))
+                        return@withContext BackupResult(
+                            false, "创建备份文件失败，请检查自定义目录写入权限"
+                        )
+                    }
+                context.contentResolver.openOutputStream(target.uri)?.use { out ->
+                    FileInputStream(tmpZip).use { it.copyTo(out) }
+                } ?: run {
+                    cleanup(listOf(tmpZip))
+                    return@withContext BackupResult(false, "打开自定义目录输出流失败")
+                }
+                tmpZip.delete()
+                val dirLabel = customDir.name ?: customDir.uri.lastPathSegment ?: "自定义目录"
+                displayPath = "$dirLabel/$filename"
+                runCatching { cleanupCustomDir(customDir) }
+            } else {
+                // MediaStore 写入 → Download/Zhiji
+                val resolver = context.contentResolver
+                val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER_NAME")
+                    put(MediaStore.Downloads.MIME_TYPE, MIME)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(collection, values)
+                    ?: return@withContext BackupResult(false, "创建 Download/Zhiji 目录失败，请检查存储")
+
+                resolver.openOutputStream(uri)?.use { out ->
+                    FileInputStream(tmpZip).use { it.copyTo(out) }
+                } ?: return@withContext BackupResult(false, "打开输出流失败")
+
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                tmpZip.delete()
+
+                // 4. 清理：只保留最新 30 个 .zbak，更旧的删除
+                runCatching { cleanupOldBackups(context) }
+                displayPath = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER_NAME/$filename"
             }
-            val uri = resolver.insert(collection, values)
-                ?: return@withContext BackupResult(false, "创建 Download/Zhiji 目录失败，请检查存储")
 
-            resolver.openOutputStream(uri)?.use { out ->
-                FileInputStream(tmpZip).use { it.copyTo(out) }
-            } ?: return@withContext BackupResult(false, "打开输出流失败")
-
-            values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            tmpZip.delete()
-
-            // 4. 清理：只保留最新 30 个 .zbak，更旧的删除
-            runCatching { cleanupOldBackups(context) }
-
-            BackupResult(true, "全局备份成功：$FOLDER_NAME/$filename", "$FOLDER_NAME/$filename")
+            BackupResult(
+                success = true,
+                message = "全局备份成功",
+                backupPath = displayPath,
+                sizeBytes = size,
+                timeMillis = nowMs
+            )
         }.getOrElse { t ->
             BackupResult(false, "备份失败：${describeThrowable(t)}")
         }
@@ -351,6 +393,33 @@ object BackupManager {
     private fun cleanup(files: List<File>) {
         files.forEach { runCatching { if (it.exists()) it.delete() } }
     }
+
+    // ---------- 自定义备份目录（SAF 树 Uri） ----------
+
+    /** 解析用户自定义备份目录；未设置或不可写时返回 null（回退默认目录） */
+    private suspend fun customBackupDir(context: Context): DocumentFile? {
+        val uriStr = runCatching { ZhiJiApp.instance.settingsDataStore.getBackupTreeUri() }
+            .getOrDefault("")
+        if (uriStr.isBlank()) return null
+        return runCatching {
+            DocumentFile.fromTreeUri(context, Uri.parse(uriStr))
+                ?.takeIf { it.exists() && it.canWrite() }
+        }.getOrNull()
+    }
+
+    /** 自定义目录内只保留最新 [KEEP_LATEST_COUNT] 个 .zbak */
+    private fun cleanupCustomDir(dir: DocumentFile) {
+        val files = dir.listFiles()
+            .filter { it.isFile && (it.name?.endsWith(BACKUP_EXT, ignoreCase = true) == true) }
+            .sortedByDescending { it.lastModified() }
+        files.drop(KEEP_LATEST_COUNT).forEach { runCatching { it.delete() } }
+    }
+
+    /** 供 UI 展示文件大小 */
+    fun humanSize(bytes: Long): String = formatSize(bytes)
+
+    /** 设置页展示的默认备份地址文案 */
+    const val DEFAULT_LOCATION_LABEL = "下载/$FOLDER_NAME"
 
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> "${bytes}B"

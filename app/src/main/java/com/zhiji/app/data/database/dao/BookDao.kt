@@ -19,6 +19,19 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE board = :board ORDER BY lastReadAt DESC, createdAt DESC")
     fun getBooksByBoard(board: String): Flow<List<BookEntity>>
 
+    /**
+     * 按板块 + 文件夹过滤书架（书籍分类）：
+     * folderId = null 表示根目录，SQLite `IS` 可正确匹配 NULL。
+     */
+    @Query(
+        "SELECT * FROM books WHERE board = :board AND folderId IS :folderId " +
+            "ORDER BY lastReadAt DESC, createdAt DESC"
+    )
+    fun getBooksByBoardAndFolder(board: String, folderId: String?): Flow<List<BookEntity>>
+
+    @Query("SELECT * FROM books WHERE board = :board AND folderId = :folderId")
+    suspend fun getBooksInFolderOnce(board: String, folderId: String): List<BookEntity>
+
     @Query("SELECT * FROM books WHERE id = :id")
     suspend fun getBookById(id: String): BookEntity?
 
@@ -39,6 +52,14 @@ interface BookDao {
 
     @Query("UPDATE books SET totalChars = :totalChars, updatedAt = :ts WHERE id = :id")
     suspend fun updateTotalChars(id: String, totalChars: Int, ts: Long = System.currentTimeMillis())
+
+    /** 书籍分类：重命名书籍标题 */
+    @Query("UPDATE books SET title = :title, updatedAt = :ts WHERE id = :id")
+    suspend fun updateTitle(id: String, title: String, ts: Long)
+
+    /** 书籍分类：把书籍移动到指定文件夹（folderId = null 表示根目录） */
+    @Query("UPDATE books SET folderId = :folderId, updatedAt = :ts WHERE id = :id")
+    suspend fun updateFolder(id: String, folderId: String?, ts: Long)
 
     // ---------- Book Annotations (注释/下划线) ----------
 

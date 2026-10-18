@@ -3,6 +3,7 @@ package com.zhiji.app.ui
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PsychologyAlt
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -18,16 +19,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.zhiji.app.ui.feature.memory.components.MemoryHost
 import com.zhiji.app.ui.feature.reader.components.ReaderHost
+import com.zhiji.app.ui.feature.settings.UserSettingsScreen
 
 private data class BottomTab(
     val label: String,
     val icon: ImageVector
 )
 
-/** 「阅见」两大核心板块：书架（智能阅读器） + 记忆库 */
+/** 「阅见」三大板块：书架（智能阅读器） + 记忆库 + 用户（设置） */
 private val tabs = listOf(
     BottomTab("书架", Icons.AutoMirrored.Filled.MenuBook),
-    BottomTab("记忆库", Icons.Filled.PsychologyAlt)
+    BottomTab("记忆库", Icons.Filled.PsychologyAlt),
+    BottomTab("用户", Icons.Filled.Person)
 )
 
 @Composable
@@ -55,7 +58,11 @@ fun MainScreen(appViewModel: AppViewModel) {
                 viewModelKey = "smart_reader",
                 board = "smart_reader"
             )
-            else -> MemoryHost(
+            1 -> MemoryHost(
+                modifier = Modifier.padding(innerPadding)
+            )
+            else -> UserSettingsScreen(
+                appViewModel = appViewModel,
                 modifier = Modifier.padding(innerPadding)
             )
         }

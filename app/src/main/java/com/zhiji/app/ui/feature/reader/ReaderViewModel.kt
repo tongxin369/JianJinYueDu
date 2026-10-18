@@ -12,6 +12,7 @@ import com.zhiji.app.core.algorithm.ZhEnRewriter
 import com.zhiji.app.data.backup.BackupManager
 import com.zhiji.app.data.database.entity.BookAnnotationEntity
 import com.zhiji.app.data.database.entity.BookEntity
+import com.zhiji.app.data.database.entity.BookFolderEntity
 import com.zhiji.app.data.datastore.SettingsDataStore
 import com.zhiji.app.data.repository.EcdictRepository
 import com.zhiji.app.data.repository.ReaderRepository
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -45,12 +47,111 @@ class ReaderViewModel(app: ZhiJiApp) : AndroidViewModel(app) {
 
     /** 设置板块（ReaderHost 进入时幂等调用；同一 key 的 ViewModel 只创建一次） */
     fun setBoard(board: String) {
-        if (_board.value != board) _board.value = board
+        if (_board.value != board) {
+            _board.value = board
+            _currentFolderId.value = null
+        }
     }
 
     val shelfBooks: StateFlow<List<BookEntity>> = _board
         .flatMapLatest { board -> repository.books(board) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ============================================================
+    // 书籍分类（文件夹树）：当前文件夹 + 文件夹列表 + 夹内书籍
+    // ============================================================
+
+    /** 当前所在文件夹 id；null = 根目录 */
+    private val _currentFolderId = MutableStateFlow<String?>(null)
+    val currentFolderId: StateFlow<String?> = _currentFolderId.asStateFlow()
+
+    /** 当前板块全部分类文件夹（构建分类树/面包屑） */
+    val folders: StateFlow<List<BookFolderEntity>> = _board
+        .flatMapLatest { board -> repository.folders(board) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 当前文件夹下的书籍（folderId = null 表示根目录） */
+    val folderBooks: StateFlow<List<BookEntity>> = combine(_board, _currentFolderId) { b, f -> b to f }
+        .flatMapLatest { (b, f) -> repository.books(b, f) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 进入某文件夹（null = 回到根目录） */
+    fun enterFolder(folderId: String?) {
+        _currentFolderId.value = folderId
+    }
+
+    fun createFolder(name: String) {
+        viewModelScope.launch {
+            runCatching { repository.createFolder(name, _currentFolderId.value, _board.value) }
+            _toastMessage.value = "文件夹已创建"
+        }
+    }
+
+    fun renameFolder(folderId: String, name: String) {
+        viewModelScope.launch {
+            runCatching { repository.renameFolder(folderId, name) }
+            _toastMessage.value = "已重命名"
+        }
+    }
+
+    /** 删除文件夹：夹内内容上移到父级；若删除的是当前文件夹则回退到父级 */
+    fun deleteFolder(folderId: String) {
+        viewModelScope.launch {
+            val parent = runCatching { repository.deleteFolder(folderId) }.getOrNull()
+            if (_currentFolderId.value == folderId) _currentFolderId.value = parent
+            _toastMessage.value = "文件夹已删除，内容已上移"
+        }
+    }
+
+    /** 重命名书籍 */
+    fun renameBook(bookId: String, title: String) {
+        viewModelScope.launch {
+            runCatching { repository.renameBook(bookId, title) }
+            _toastMessage.value = "已重命名"
+        }
+    }
+
+    /** 移动书籍到指定文件夹 */
+    fun moveBookTo(bookId: String, folderId: String?) {
+        viewModelScope.launch {
+            runCatching { repository.moveBook(bookId, folderId) }
+            _toastMessage.value = "已移动"
+        }
+    }
+
+    // ---- 书籍复制/剪切/粘贴（分类整理用）----
+    data class ClipboardItem(val mode: String, val bookId: String, val title: String)
+
+    private val _clipboard = MutableStateFlow<ClipboardItem?>(null)
+    val clipboard: StateFlow<ClipboardItem?> = _clipboard.asStateFlow()
+
+    fun copyBookToClipboard(book: BookEntity) {
+        _clipboard.value = ClipboardItem("copy", book.id, book.title)
+        _toastMessage.value = "已复制《${book.title}》，可到目标文件夹粘贴"
+    }
+
+    fun cutBookToClipboard(book: BookEntity) {
+        _clipboard.value = ClipboardItem("cut", book.id, book.title)
+        _toastMessage.value = "已剪切《${book.title}》，可到目标文件夹粘贴"
+    }
+
+    fun clearClipboard() {
+        _clipboard.value = null
+    }
+
+    /** 粘贴到当前文件夹：复制 = 新建副本；剪切 = 移动 */
+    fun pasteClipboard() {
+        val item = _clipboard.value ?: return
+        val target = _currentFolderId.value
+        viewModelScope.launch {
+            when (item.mode) {
+                "copy" -> runCatching { repository.copyBook(item.bookId, target) }
+                "cut" -> runCatching { repository.moveBook(item.bookId, target) }
+            }
+            if (item.mode == "cut") _clipboard.value = null
+            _toastMessage.value = "已粘贴《${item.title}》"
+        }
+    }
 
     private val _currentBookId = MutableStateFlow<String?>(null)
     val currentBook: StateFlow<BookEntity?> = _currentBookId
@@ -931,7 +1032,7 @@ class ReaderViewModel(app: ZhiJiApp) : AndroidViewModel(app) {
 
     fun onImportPicked(uri: Uri) {
         viewModelScope.launch {
-            repository.importFromUri(uri, _board.value)
+            repository.importFromUri(uri, _board.value, _currentFolderId.value)
         }
     }
 

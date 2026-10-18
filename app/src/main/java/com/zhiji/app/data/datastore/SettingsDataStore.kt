@@ -44,6 +44,10 @@ class SettingsDataStore(private val context: Context) {
         private val READING_REWRITE_MODE = stringPreferencesKey("reading_rewrite_mode")
         // 正文字体缩放百分比（100 = 原始 16sp；范围 80~240）
         private val READING_FONT_SCALE = intPreferencesKey("reading_font_scale")
+        // ---- 备份：自定义备份目录（SAF 树 Uri；空 = 使用默认 下载/Zhiji）----
+        private val BACKUP_TREE_URI = stringPreferencesKey("backup_tree_uri")
+        // 自定义备份目录的可读名称（用于设置页展示"备份地址"）
+        private val BACKUP_TREE_LABEL = stringPreferencesKey("backup_tree_label")
 
         /** 正文字体缩放默认值/上下限（百分比） */
         const val DEFAULT_FONT_SCALE = 100
@@ -136,5 +140,29 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun setLastBackupVersion(version: Long) {
         context.dataStore.edit { it[LAST_BACKUP_VERSION] = version }
+    }
+
+    // ---- 自定义备份目录（SAF 树 Uri） ----
+    /** 自定义备份目录 Uri 字符串；空字符串 = 未设置（使用默认 下载/Zhiji） */
+    val backupTreeUri: Flow<String> = context.dataStore.data.map { it[BACKUP_TREE_URI] ?: "" }
+
+    /** 自定义备份目录可读名称（设置页展示） */
+    val backupTreeLabel: Flow<String> = context.dataStore.data.map { it[BACKUP_TREE_LABEL] ?: "" }
+
+    suspend fun getBackupTreeUri(): String = context.dataStore.data.first()[BACKUP_TREE_URI] ?: ""
+    suspend fun getBackupTreeLabel(): String = context.dataStore.data.first()[BACKUP_TREE_LABEL] ?: ""
+
+    suspend fun setBackupTree(uri: String, label: String) {
+        context.dataStore.edit {
+            it[BACKUP_TREE_URI] = uri
+            it[BACKUP_TREE_LABEL] = label
+        }
+    }
+
+    suspend fun clearBackupTree() {
+        context.dataStore.edit {
+            it[BACKUP_TREE_URI] = ""
+            it[BACKUP_TREE_LABEL] = ""
+        }
     }
 }

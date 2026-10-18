@@ -22,7 +22,7 @@ class ZhiJiApp : Application() {
 
     val database by lazy { AppDatabase.getInstance(this) }
     val settingsDataStore by lazy { SettingsDataStore(this) }
-    val readerRepository by lazy { ReaderRepository(this, database.bookDao()) }
+    val readerRepository by lazy { ReaderRepository(this, database.bookDao(), database.bookFolderDao()) }
     /** 离线英汉词典（ECDICT 精简版，注释窗「词典释义」Tab 使用） */
     val ecdictRepository by lazy { EcdictRepository(this) }
     /** Phase 2 记忆库：卡片 CRUD + FSRS 调度 */

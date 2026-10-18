@@ -6,11 +6,14 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.zhiji.app.core.text.TextEncoding
 import com.zhiji.app.data.database.dao.BookDao
+import com.zhiji.app.data.database.dao.BookFolderDao
 import com.zhiji.app.data.database.entity.BookAnnotationEntity
 import com.zhiji.app.data.database.entity.BookEntity
+import com.zhiji.app.data.database.entity.BookFolderEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
@@ -29,7 +32,8 @@ import java.util.UUID
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReaderRepository(
     private val context: Context,
-    private val bookDao: BookDao
+    private val bookDao: BookDao,
+    private val bookFolderDao: BookFolderDao
 ) {
 
     private val contentMaxCacheBytes = 5 * 1024 * 1024L // 5MB
@@ -39,6 +43,10 @@ class ReaderRepository(
 
     /** v39 按板块返回书架流：smart_reader / multi_format */
     fun books(board: String): Flow<List<BookEntity>> = bookDao.getBooksByBoard(board)
+
+    /** 按板块 + 文件夹返回书架流（书籍分类）；folderId = null 表示根目录 */
+    fun books(board: String, folderId: String?): Flow<List<BookEntity>> =
+        bookDao.getBooksByBoardAndFolder(board, folderId)
 
     fun getBookFlow(id: String): Flow<BookEntity?> = bookDao.getBookByIdFlow(id)
     suspend fun getBook(id: String): BookEntity? = bookDao.getBookById(id)
@@ -146,8 +154,12 @@ class ReaderRepository(
         return sum
     }
 
-    /** v39 导入时写入所属板块 board（智能阅读器默认 smart_reader） */
-    suspend fun importFromUri(uri: Uri, board: String = "smart_reader"): BookEntity? = withContext(Dispatchers.IO) {
+    /** v39 导入时写入所属板块 board + 分类文件夹 folderId（智能阅读器默认 smart_reader / 根目录） */
+    suspend fun importFromUri(
+        uri: Uri,
+        board: String = "smart_reader",
+        folderId: String? = null
+    ): BookEntity? = withContext(Dispatchers.IO) {
         val doc = DocumentFile.fromSingleUri(context, uri) ?: return@withContext null
         val name = doc.name ?: "未命名"
         val size = doc.length()
@@ -194,6 +206,7 @@ class ReaderRepository(
             sizeBytes = size,
             totalChars = totalChars,
             board = board,
+            folderId = folderId,
             createdAt = now,
             updatedAt = now
         )
@@ -276,6 +289,93 @@ class ReaderRepository(
 
     suspend fun saveProgress(bookId: String, charOffset: Int) {
         bookDao.updateProgress(bookId, charOffset.coerceAtLeast(0), System.currentTimeMillis())
+    }
+
+    // ---------- 书籍分类：文件夹树 + 书籍重命名/移动/复制 ----------
+
+    /** 某板块全部文件夹（分类树） */
+    fun folders(board: String): Flow<List<BookFolderEntity>> = bookFolderDao.getFoldersByBoard(board)
+
+    /** 新建文件夹（parentId = null 表示根目录） */
+    suspend fun createFolder(name: String, parentId: String?, board: String): BookFolderEntity =
+        withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val entity = BookFolderEntity(
+                id = UUID.randomUUID().toString(),
+                name = name.trim().ifBlank { "新建文件夹" },
+                parentId = parentId,
+                board = board,
+                createdAt = now,
+                updatedAt = now
+            )
+            bookFolderDao.insert(entity)
+            entity
+        }
+
+    /** 重命名文件夹 */
+    suspend fun renameFolder(folderId: String, name: String) = withContext(Dispatchers.IO) {
+        bookFolderDao.rename(folderId, name.trim().ifBlank { "未命名文件夹" }, System.currentTimeMillis())
+    }
+
+    /**
+     * 删除文件夹：内容（子文件夹 + 书籍）上移到父文件夹，避免误删用户数据。
+     * @return 若被删的是当前所在文件夹，返回其父文件夹 id（供 UI 回退导航），否则返回 null。
+     */
+    suspend fun deleteFolder(folderId: String): String? = withContext(Dispatchers.IO) {
+        val folder = bookFolderDao.getFolderById(folderId) ?: return@withContext null
+        val parentId = folder.parentId
+        val now = System.currentTimeMillis()
+        // 直接子文件夹 → 挂到父
+        bookFolderDao.getFoldersByBoard(folder.board).first()
+            .filter { it.parentId == folderId }
+            .forEach { child -> bookFolderDao.updateParent(child.id, parentId, now) }
+        // 夹内书籍 → 移到父
+        bookDao.getBooksInFolderOnce(folder.board, folderId)
+            .forEach { book -> bookDao.updateFolder(book.id, parentId, now) }
+        bookFolderDao.deleteById(folderId)
+        parentId
+    }
+
+    /** 重命名书籍 */
+    suspend fun renameBook(bookId: String, title: String) = withContext(Dispatchers.IO) {
+        bookDao.updateTitle(bookId, title.trim().ifBlank { "未命名" }, System.currentTimeMillis())
+    }
+
+    /** 移动书籍到指定文件夹（folderId = null 表示根目录） */
+    suspend fun moveBook(bookId: String, folderId: String?) = withContext(Dispatchers.IO) {
+        bookDao.updateFolder(bookId, folderId, System.currentTimeMillis())
+    }
+
+    /**
+     * 复制书籍到指定文件夹（粘贴-复制）。新条目重置阅读进度。
+     * 大文件（无缓存正文）会复制一份本地副本文件，避免两本书共享同一路径导致删除互相影响。
+     */
+    suspend fun copyBook(bookId: String, folderId: String?): BookEntity? = withContext(Dispatchers.IO) {
+        val book = bookDao.getBookById(bookId) ?: return@withContext null
+        val newId = UUID.randomUUID().toString()
+        var newSource = book.sourceUri
+        if (book.content.isNullOrBlank()) {
+            runCatching {
+                val path = Uri.parse(book.sourceUri).path
+                if (path != null && path.startsWith(localBooksDir.absolutePath + File.separator)) {
+                    val dst = File(localBooksDir, "$newId.txt")
+                    File(path).copyTo(dst, overwrite = true)
+                    newSource = Uri.fromFile(dst).toString()
+                }
+            }
+        }
+        val now = System.currentTimeMillis()
+        val entity = book.copy(
+            id = newId,
+            sourceUri = newSource,
+            folderId = folderId,
+            readOffset = 0,
+            lastReadAt = 0L,
+            createdAt = now,
+            updatedAt = now
+        )
+        bookDao.insert(entity)
+        entity
     }
 
     /**

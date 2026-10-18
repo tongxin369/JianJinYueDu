@@ -4,7 +4,10 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.zhiji.app.data.database.dao.BookDao
+import com.zhiji.app.data.database.dao.BookFolderDao
 import com.zhiji.app.data.database.dao.BookPageCacheDao
 import com.zhiji.app.data.database.dao.BookRewriteDao
 import com.zhiji.app.data.database.dao.MemoryDao
@@ -12,6 +15,7 @@ import com.zhiji.app.data.database.dao.VocabHistoryDao
 import com.zhiji.app.data.database.dao.VocabProficiencyDao
 import com.zhiji.app.data.database.entity.BookAnnotationEntity
 import com.zhiji.app.data.database.entity.BookEntity
+import com.zhiji.app.data.database.entity.BookFolderEntity
 import com.zhiji.app.data.database.entity.BookPageCacheEntity
 import com.zhiji.app.data.database.entity.BookRewriteEntity
 import com.zhiji.app.data.database.entity.MemoryCardEntity
@@ -32,6 +36,7 @@ import com.zhiji.app.data.database.entity.VocabProficiencyEntity
 @Database(
     entities = [
         BookEntity::class,
+        BookFolderEntity::class,
         BookRewriteEntity::class,
         BookPageCacheEntity::class,
         MemoryCardEntity::class,
@@ -40,12 +45,14 @@ import com.zhiji.app.data.database.entity.VocabProficiencyEntity
         VocabProficiencyEntity::class,
         VocabHistoryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun bookDao(): BookDao
+    /** 书架分类文件夹 DAO（book_folders 表） */
+    abstract fun bookFolderDao(): BookFolderDao
     /** Phase 3 中英混排改写缓存 DAO（book_rewrites 表） */
     abstract fun bookRewriteDao(): BookRewriteDao
     /** 翻页式整屏分页结果缓存 DAO（book_pages 表，大文件免重复分页） */
@@ -61,6 +68,29 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        /**
+         * v1 → v2：新增书籍分类文件夹表 book_folders + 书籍 folderId 字段。
+         * 用增量迁移保留用户已有数据（书籍/记忆库），不整库重建。
+         */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE books ADD COLUMN folderId TEXT")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `book_folders` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `parentId` TEXT,
+                        `board` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -68,6 +98,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "zhiji.db"
                 )
+                    .addMigrations(MIGRATION_1_2)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

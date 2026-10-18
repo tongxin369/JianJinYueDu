@@ -30,6 +30,8 @@ data class BookEntity(
     val readOffset: Int = 0,
     /** v39 所属板块：smart_reader / multi_format（书架数据隔离） */
     val board: String = "smart_reader",
+    /** 所属分类文件夹 id；null = 根目录（书籍分类树） */
+    val folderId: String? = null,
     val lastReadAt: Long = 0L,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L

@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -27,21 +29,26 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,85 +78,155 @@ fun ReaderShelfScreen(
     onOpenBook: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val books by viewModel.shelfBooks.collectAsStateWithLifecycle()
+    val books by viewModel.folderBooks.collectAsStateWithLifecycle()
+    val allBooks by viewModel.shelfBooks.collectAsStateWithLifecycle()
+    val folders by viewModel.folders.collectAsStateWithLifecycle()
+    val currentFolderId by viewModel.currentFolderId.collectAsStateWithLifecycle()
+    val clipboard by viewModel.clipboard.collectAsStateWithLifecycle()
+    val toast by viewModel.toastMessage.collectAsStateWithLifecycle()
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+
+    LaunchedEffect(toast) {
+        val msg = toast
+        if (msg != null) {
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            viewModel.consumeToast()
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) viewModel.onImportPicked(uri)
     }
+    val doImport = { importLauncher.launch(arrayOf("text/plain", "text/markdown", "*/*")) }
 
-    // 恢复备份选择器：允许用户选任意位置（含 Download/Zhiji/ 下的备份文件）的 .db 文件
-    val restoreLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val r = viewModel.restoreFromUri(uri)
-            Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
-        }
+    // 当前文件夹名称（顶部展示）
+    val currentFolderName = remember(folders, currentFolderId) {
+        folders.firstOrNull { it.id == currentFolderId }?.name
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.AutoStories, null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            title,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        scope.launch {
-                            val r = viewModel.backupManually()
-                            Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
-                        }
-                    }) {
-                        Icon(Icons.Filled.SaveAlt, contentDescription = "手动备份到下载/Zhiji")
-                    }
-                    IconButton(onClick = {
-                        restoreLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                    }) {
-                        Icon(Icons.Filled.Restore, contentDescription = "恢复备份")
-                    }
-                    IconButton(onClick = {
-                        importLauncher.launch(arrayOf("text/plain", "text/markdown", "*/*"))
-                    }) {
-                        Icon(Icons.Filled.Add, contentDescription = "导入书籍")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        modifier = modifier,
+        drawerContent = {
+            ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.9f)) {
+                ShelfFolderDrawer(
+                    folders = folders,
+                    currentBooks = books,
+                    allBooks = allBooks,
+                    currentFolderId = currentFolderId,
+                    clipboard = clipboard,
+                    onEnterFolder = { viewModel.enterFolder(it) },
+                    onCreateFolder = { viewModel.createFolder(it) },
+                    onRenameFolder = { id, name -> viewModel.renameFolder(id, name) },
+                    onDeleteFolder = { viewModel.deleteFolder(it) },
+                    onOpenBook = { id ->
+                        scope.launch { drawerState.close() }
+                        onOpenBook(id)
+                    },
+                    onRenameBook = { id, name -> viewModel.renameBook(id, name) },
+                    onMoveBook = { id, folderId -> viewModel.moveBookTo(id, folderId) },
+                    onCopyBook = { viewModel.copyBookToClipboard(it) },
+                    onCutBook = { viewModel.cutBookToClipboard(it) },
+                    onPaste = { viewModel.pasteClipboard() },
+                    onImportBook = { doImport() }
                 )
-            )
+            }
         }
-    ) { padding ->
-        if (books.isEmpty()) {
-            EmptyShelf(
-                modifier = Modifier.padding(padding),
-                onImport = { importLauncher.launch(arrayOf("text/plain", "text/markdown", "*/*")) }
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(books, key = { it.id }) { book ->
-                    BookCard(
-                        book = book,
-                        onClick = { onOpenBook(book.id) },
-                        onDelete = { viewModel.deleteBook(book.id) }
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "书籍分类列表")
+                        }
+                    },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.AutoStories, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    title,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    if (currentFolderId == null) "全部书籍" else currentFolderName ?: "文件夹",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { doImport() }) {
+                            Icon(Icons.Filled.Add, contentDescription = "导入书籍")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
                     )
+                )
+            }
+        ) { padding ->
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                // 面包屑（当前分类位置）：记录 (id, name) 便于点击跳回任意层级
+                val path = remember(folders, currentFolderId) {
+                    val map = folders.associateBy { it.id }
+                    val list = mutableListOf<Pair<String, String>>()
+                    var id = currentFolderId
+                    var guard = 0
+                    while (id != null && guard < 64) {
+                        val f = map[id] ?: break
+                        list.add(0, f.id to f.name)
+                        id = f.parentId
+                        guard++
+                    }
+                    list
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Breadcrumb("全部", currentFolderId == null) { viewModel.enterFolder(null) }
+                    path.forEachIndexed { index, (fid, name) ->
+                        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+                        Breadcrumb(name, index == path.lastIndex) { viewModel.enterFolder(fid) }
+                    }
+                }
+
+                if (books.isEmpty()) {
+                    EmptyShelf(
+                        inFolder = currentFolderId != null,
+                        onImport = { doImport() },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(books, key = { it.id }) { book ->
+                            BookCard(
+                                book = book,
+                                onClick = { onOpenBook(book.id) },
+                                onDelete = { viewModel.deleteBook(book.id) }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -157,26 +234,42 @@ fun ReaderShelfScreen(
 }
 
 @Composable
-private fun EmptyShelf(onImport: () -> Unit, modifier: Modifier = Modifier) {
+private fun Breadcrumb(text: String, active: Boolean, onClick: () -> Unit) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+    )
+}
+
+@Composable
+private fun EmptyShelf(inFolder: Boolean, onImport: () -> Unit, modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Filled.Book,
+            imageVector = if (inFolder) Icons.Filled.Folder else Icons.Filled.Book,
             contentDescription = null,
             modifier = Modifier.size(72.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
         )
         Text(
-            "书架还空着",
+            if (inFolder) "此文件夹还没有书籍" else "书架还空着",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 16.dp)
         )
         Text(
-            "导入 .txt / .md 文件，开启循序渐进的阅读学习",
+            if (inFolder) "点击右下导入按钮，把书籍加入此文件夹" else "导入 .txt / .md 文件，开启循序渐进的阅读学习",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             modifier = Modifier.padding(top = 6.dp)
@@ -237,8 +330,6 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onDelete: () -> Unit
                 Spacer(Modifier.height(4.dp))
                 val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
                 val lastText = if (book.lastReadAt > 0) "上次阅读：${fmt.format(Date(book.lastReadAt))}" else "尚未阅读"
-                // 统一用 totalChars（处理后正文总字符数）与 readOffset 同单位计算进度
-                // 兼容老书（totalChars=0 但 content/sizeBytes>0）时退化用 字符数粗估 / 不显示
                 val pct = when {
                     book.totalChars > 0 && book.readOffset >= 0 ->
                         (book.readOffset.toDouble() / book.totalChars * 100).toInt().coerceIn(0, 100)
@@ -253,7 +344,6 @@ private fun BookCard(book: BookEntity, onClick: () -> Unit, onDelete: () -> Unit
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
-                // 进度条（与阅读页内部进度条颜色保持一致）
                 if (pct != null) {
                     Spacer(Modifier.height(6.dp))
                     Box(
