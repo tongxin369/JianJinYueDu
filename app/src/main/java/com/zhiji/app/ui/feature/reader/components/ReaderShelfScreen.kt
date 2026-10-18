@@ -6,7 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -29,7 +27,6 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -59,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,10 +76,11 @@ fun ReaderShelfScreen(
     onOpenBook: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 书库（分组）：抽屉里浏览、分类、整理的全部书籍
     val booksAll by viewModel.folderBooks.collectAsStateWithLifecycle()
     val allBooks by viewModel.shelfBooks.collectAsStateWithLifecycle()
-    // 书架只显示用户勾选「显示在书架」的书籍；分类抽屉则展示全部
-    val books = remember(booksAll) { booksAll.filter { it.shownOnShelf } }
+    // 书架（书桌）：与文件夹浏览完全解耦，只呈现用户勾选「显示到书架」的书，作为快捷方式
+    val books = remember(allBooks) { allBooks.filter { it.shownOnShelf } }
     val folders by viewModel.folders.collectAsStateWithLifecycle()
     val currentFolderId by viewModel.currentFolderId.collectAsStateWithLifecycle()
     val clipboard by viewModel.clipboard.collectAsStateWithLifecycle()
@@ -99,16 +98,23 @@ fun ReaderShelfScreen(
         }
     }
 
+    // 两个导入入口：书架导入放进书库根目录；书库抽屉导入放进当前所在文件夹
+    var importToShelf by remember { mutableStateOf(true) }
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        if (uri != null) viewModel.onImportPicked(uri)
+        if (uri != null) {
+            if (importToShelf) viewModel.onImportPickedToShelf(uri) else viewModel.onImportPicked(uri)
+        }
     }
-    val doImport = { importLauncher.launch(arrayOf("text/plain", "text/markdown", "*/*")) }
-
-    // 当前文件夹名称（顶部展示）
-    val currentFolderName = remember(folders, currentFolderId) {
-        folders.firstOrNull { it.id == currentFolderId }?.name
+    val importMimes = arrayOf("text/plain", "text/markdown", "*/*")
+    val doShelfImport = {
+        importToShelf = true
+        importLauncher.launch(importMimes)
+    }
+    val doFolderImport = {
+        importToShelf = false
+        importLauncher.launch(importMimes)
     }
 
     ModalNavigationDrawer(
@@ -136,7 +142,7 @@ fun ReaderShelfScreen(
                     onCutBook = { viewModel.cutBookToClipboard(it) },
                     onToggleShowOnShelf = { viewModel.setBookShownOnShelf(it.id, !it.shownOnShelf) },
                     onPaste = { viewModel.pasteClipboard() },
-                    onImportBook = { doImport() }
+                    onImportBook = { doFolderImport() }
                 )
             }
         }
@@ -162,7 +168,7 @@ fun ReaderShelfScreen(
                                     maxLines = 1
                                 )
                                 Text(
-                                    if (currentFolderId == null) "全部书籍" else currentFolderName ?: "文件夹",
+                                    "我的书架 · ${books.size} 本",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1
@@ -171,7 +177,7 @@ fun ReaderShelfScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = { doImport() }) {
+                        IconButton(onClick = { doShelfImport() }) {
                             Icon(Icons.Filled.Add, contentDescription = "导入书籍")
                         }
                     },
@@ -182,39 +188,10 @@ fun ReaderShelfScreen(
             }
         ) { padding ->
             Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                // 面包屑（当前分类位置）：记录 (id, name) 便于点击跳回任意层级
-                val path = remember(folders, currentFolderId) {
-                    val map = folders.associateBy { it.id }
-                    val list = mutableListOf<Pair<String, String>>()
-                    var id = currentFolderId
-                    var guard = 0
-                    while (id != null && guard < 64) {
-                        val f = map[id] ?: break
-                        list.add(0, f.id to f.name)
-                        id = f.parentId
-                        guard++
-                    }
-                    list
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Breadcrumb("全部", currentFolderId == null) { viewModel.enterFolder(null) }
-                    path.forEachIndexed { index, (fid, name) ->
-                        Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
-                        Breadcrumb(name, index == path.lastIndex) { viewModel.enterFolder(fid) }
-                    }
-                }
-
                 if (books.isEmpty()) {
                     EmptyShelf(
-                        inFolder = currentFolderId != null,
-                        hasHidden = booksAll.isNotEmpty(),
-                        onImport = { doImport() },
+                        hasHidden = allBooks.isNotEmpty(),
+                        onImport = { doShelfImport() },
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
@@ -238,24 +215,7 @@ fun ReaderShelfScreen(
 }
 
 @Composable
-private fun Breadcrumb(text: String, active: Boolean, onClick: () -> Unit) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 6.dp, vertical = 4.dp)
-    )
-}
-
-@Composable
 private fun EmptyShelf(
-    inFolder: Boolean,
     hasHidden: Boolean,
     onImport: () -> Unit,
     modifier: Modifier = Modifier
@@ -266,30 +226,27 @@ private fun EmptyShelf(
         verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = if (inFolder) Icons.Filled.Folder else Icons.Filled.Book,
+            imageVector = Icons.Filled.Book,
             contentDescription = null,
             modifier = Modifier.size(72.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
         )
         Text(
-            when {
-                hasHidden -> "部分书籍已隐藏"
-                inFolder -> "此文件夹还没有书籍"
-                else -> "书架还空着"
-            },
+            "书架还空着",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 16.dp)
         )
         Text(
-            when {
-                hasHidden -> "这些书已设置为不显示在书架，可在左上角分类列表里改回「显示在书架」"
-                inFolder -> "点击右上角导入按钮，把书籍加入此文件夹"
-                else -> "导入 .txt / .md / .html 文件，开启循序渐进的阅读学习"
+            text = if (hasHidden) {
+                "书籍都在书库里。打开左上角分类列表，点书籍右侧菜单选择「显示到书架」，即可作为快捷方式放上来"
+            } else {
+                "点击右上角导入按钮，或从左侧书库把书添加到书架"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-            modifier = Modifier.padding(top = 6.dp)
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp, start = 32.dp, end = 32.dp)
         )
         Box(
             modifier = Modifier

@@ -386,7 +386,7 @@ private fun BookRow(
             )
             if (!book.shownOnShelf) {
                 Text(
-                    "未显示在书架",
+                    "未显示到书架",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -398,7 +398,7 @@ private fun BookRow(
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text(if (book.shownOnShelf) "从书架隐藏" else "显示在书架") },
+                    text = { Text(if (book.shownOnShelf) "从书架移除" else "显示到书架") },
                     leadingIcon = {
                         Icon(
                             if (book.shownOnShelf) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,

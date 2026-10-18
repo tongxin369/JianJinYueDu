@@ -123,7 +123,7 @@ class ReaderViewModel(app: ZhiJiApp) : AndroidViewModel(app) {
     fun setBookShownOnShelf(bookId: String, shown: Boolean) {
         viewModelScope.launch {
             runCatching { repository.setBookShownOnShelf(bookId, shown) }
-            _toastMessage.value = if (shown) "已显示在书架" else "已从书架隐藏（分类列表中仍可见）"
+            _toastMessage.value = if (shown) "已显示到书架" else "已从书架移除（书库中仍保留）"
         }
     }
 
@@ -1041,6 +1041,13 @@ class ReaderViewModel(app: ZhiJiApp) : AndroidViewModel(app) {
     fun onImportPicked(uri: Uri) {
         viewModelScope.launch {
             repository.importFromUri(uri, _board.value, _currentFolderId.value)
+        }
+    }
+
+    /** 从书架（书桌）导入：统一落到书库根目录，不依赖抽屉当前所在文件夹 */
+    fun onImportPickedToShelf(uri: Uri) {
+        viewModelScope.launch {
+            repository.importFromUri(uri, _board.value, null)
         }
     }
 
